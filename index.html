@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Radar — veille mondiale</title>
+<meta name="theme-color" content="#0F1B26">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Radar">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --ink:#0F1B26; --panel:#152433; --panel2:#1B2E40; --line:#27405A;
+  --text:#E6EDF2; --muted:#8FA3B5; --sand:#E8C07D;
+  --red:#E5484D; --amber:#F2A541; --teal:#4CC3B5; --dz:#1E9A5A;
+  --head:"Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body:"Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--ink);color:var(--text);font:16px/1.45 var(--body);
+  display:grid;grid-template-rows:auto 1fr auto;height:100dvh;overflow:hidden;
+  -webkit-tap-highlight-color:transparent}
+a{color:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--sand);outline-offset:2px}
+
+/* Barre du haut */
+.top{display:flex;align-items:center;gap:10px;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) 14px 8px;
+  background:var(--ink);border-bottom:1px solid var(--line)}
+.brand{font:700 26px/1 var(--head);letter-spacing:.02em;color:var(--sand)}
+.live{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-left:auto}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 0 rgba(76,195,181,.6);animation:ping 2.4s infinite}
+.dot.off{background:var(--muted);animation:none}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(76,195,181,.55)}70%{box-shadow:0 0 0 8px rgba(76,195,181,0)}100%{box-shadow:0 0 0 0 rgba(76,195,181,0)}}
+.refresh{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px}
+.refresh.spin span{display:inline-block;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* Contenu */
+main{position:relative;overflow:hidden}
+.view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 24px;display:none}
+.view.on{display:block}
+#v-map{padding:0}
+#map{position:absolute;inset:0;background:#0b141c}
+h2{font:600 28px/1.05 var(--head);margin:4px 0 2px}
+h3{font:600 20px/1.1 var(--head);margin:22px 0 8px;color:var(--sand)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 12px}
+.status{font-size:13px;color:var(--muted);margin:6px 0 10px}
+.status.err{color:var(--amber)}
+
+/* Compteurs sur la carte */
+.overlay{position:absolute;z-index:500;left:10px;right:10px;top:10px;display:flex;gap:8px;flex-wrap:wrap;pointer-events:none}
+.tog{pointer-events:auto;display:flex;align-items:baseline;gap:6px;background:rgba(21,36,51,.92);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 10px;font-size:14px;backdrop-filter:blur(6px)}
+.tog b{font:700 19px/1 var(--head)}
+.tog i{width:9px;height:9px;border-radius:50%;display:inline-block;align-self:center}
+.tog[aria-pressed="false"]{opacity:.45}
+
+/* Listes */
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px}
+.chip{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px}
+.chip[aria-pressed="true"]{background:var(--sand);color:var(--ink);border-color:var(--sand);font-weight:600}
+.list{list-style:none;margin:0;padding:0}
+.item{display:block;padding:11px 0 11px 12px;border-bottom:1px solid var(--line);text-decoration:none;border-left:3px solid transparent}
+.item.crit{border-left-color:var(--red)}
+.item.elev{border-left-color:var(--amber)}
+.item .t{font-weight:600;line-height:1.3}
+.item .m{font-size:13px;color:var(--muted);margin-top:3px}
+.empty{color:var(--muted);padding:18px 0}
+
+/* Indice de tension */
+.hot{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--line);align-items:center}
+.hot .n{font-weight:600}
+.hot .c{font:700 20px/1 var(--head)}
+.bar{grid-column:1/-1;height:5px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar span{display:block;height:100%;border-radius:3px}
+
+/* Marchés */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.q{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.q .l{font-size:13px;color:var(--muted)}
+.q .v{font:700 26px/1.1 var(--head);margin-top:2px}
+.q .d{font-size:14px;font-weight:600}
+.up{color:var(--teal)} .down{color:var(--red)}
+.tv{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px;min-height:170px}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
+
+/* Algérie */
+.dzbar{height:4px;display:flex;border-radius:2px;overflow:hidden;margin:6px 0 12px;width:64px}
+.dzbar span:first-child{flex:1;background:var(--dz)}
+.dzbar span:last-child{flex:1;background:#fff}
+.linkbtn{background:none;border:0;color:var(--sand);padding:0;font-size:13px;text-decoration:underline}
+
+/* Navigation du bas */
+nav{display:grid;grid-template-columns:repeat(5,1fr);background:var(--panel);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{background:none;border:0;padding:9px 2px 8px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav button[aria-selected="true"]{color:var(--sand)}
+
+/* Leaflet sombre */
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--text);border:1px solid var(--line)}
+.leaflet-popup-content{margin:10px 12px;font:14px/1.4 var(--body)}
+.leaflet-popup-content a{color:var(--sand)}
+.leaflet-container a.leaflet-popup-close-button{color:var(--muted)}
+.leaflet-control-attribution{background:rgba(15,27,38,.8)!important;color:var(--muted)!important;font-size:10px}
+.leaflet-control-attribution a{color:var(--muted)!important}
+.ev{font-size:18px;line-height:1;text-shadow:0 0 4px #000}
+.pulse{border-radius:50%;background:rgba(229,72,77,.35);border:2px solid var(--red);animation:pul 2.2s ease-out infinite}
+.pulse.mid{background:rgba(242,165,65,.3);border-color:var(--amber);animation:none}
+@keyframes pul{0%{transform:scale(.85)}50%{transform:scale(1.08)}100%{transform:scale(.85)}}
+@media (prefers-reduced-motion:reduce){.dot,.pulse,.refresh.spin span{animation:none}}
+@media (min-width:900px){.view:not(#v-map){max-width:760px;margin:0 auto;left:0;right:0}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">Radar</div>
+  <div class="live"><span class="dot" id="liveDot"></span><span id="liveTxt">Connexion…</span></div>
+  <button class="refresh" id="refreshBtn" aria-label="Tout actualiser"><span>↻</span></button>
+</header>
+
+<main>
+  <section class="view on" id="v-map" aria-label="Carte">
+    <div id="map"></div>
+    <div class="overlay">
+      <button class="tog" data-layer="quakes" aria-pressed="true"><i style="background:var(--sand)"></i><b id="cQuakes">–</b> séismes 4.5+ (24 h)</button>
+      <button class="tog" data-layer="eonet" aria-pressed="true"><i style="background:var(--teal)"></i><b id="cEonet">–</b> catastrophes en cours</button>
+      <button class="tog" data-layer="tension" aria-pressed="true"><i style="background:var(--red)"></i><b id="cTension">–</b> zones de tension</button>
+    </div>
+  </section>
+
+  <section class="view" id="v-news" aria-label="Actualités">
+    <h2>Actualités mondiales</h2>
+    <p class="sub">Les derniers titres de plusieurs rédactions internationales. Un liseré rouge signale un événement grave, orange une situation tendue.</p>
+    <div class="chips" id="newsChips"></div>
+    <div class="status" id="newsStatus">Chargement…</div>
+    <ul class="list" id="newsList"></ul>
+  </section>
+
+  <section class="view" id="v-tension" aria-label="Tensions">
+    <h2>Conflits et tensions</h2>
+    <p class="sub">Indice calculé à partir des titres des dernières 24 h : plus un pays revient dans l'actualité militaire, plus sa barre est longue. C'est un signal d'attention, pas une mesure de violence.</p>
+    <div class="status" id="tensionStatus">Chargement…</div>
+    <div id="hotList"></div>
+    <h3>Derniers titres liés aux conflits</h3>
+    <ul class="list" id="conflictList"></ul>
+  </section>
+
+  <section class="view" id="v-markets" aria-label="Marchés">
+    <h2>Marchés</h2>
+    <p class="sub">Matières premières, cryptomonnaies et devises.</p>
+    <h3>Énergie et métaux</h3>
+    <div class="tv" data-tv="TVC:UKOIL"></div>
+    <div class="tv" data-tv="TVC:USOIL"></div>
+    <div class="tv" data-tv="TVC:GOLD"></div>
+    <div class="tv" data-tv="NYMEX:NG1!"></div>
+    <h3>Cryptomonnaies</h3>
+    <div class="status" id="cryptoStatus">Chargement…</div>
+    <div class="grid" id="cryptoGrid"></div>
+    <h3>Devises</h3>
+    <div class="grid" id="fxGrid"></div>
+    <p class="note">Graphiques des matières premières fournis par TradingView. Cryptos : CoinGecko. Devises : ExchangeRate-API (taux de référence).</p>
+  </section>
+
+  <section class="view" id="v-dz" aria-label="Algérie">
+    <h2>Algérie</h2>
+    <div class="dzbar"><span></span><span></span></div>
+    <h3>Dinar algérien</h3>
+    <div class="grid" id="dzFx"></div>
+    <p class="note">Taux officiels de référence. Le taux du marché parallèle (square) est nettement différent.</p>
+    <h3>Pétrole Brent</h3>
+    <div class="tv" data-tv="TVC:UKOIL" data-small="1"></div>
+    <h3>Séismes récents en Algérie et alentours</h3>
+    <div class="status" id="dzQuakeStatus">Chargement…</div>
+    <ul class="list" id="dzQuakes"></ul>
+    <p class="note">Source USGS, magnitude 2.5 et plus sur 30 jours. Le CRAAG publie aussi les petites secousses.</p>
+    <h3>Actualité</h3>
+    <div class="status" id="dzNewsStatus">Chargement…</div>
+    <ul class="list" id="dzNews"></ul>
+  </section>
+</main>
+
+<nav role="tablist">
+  <button role="tab" data-view="v-map" aria-selected="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>Carte</button>
+  <button role="tab" data-view="v-news" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>Actus</button>
+  <button role="tab" data-view="v-tension" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>Tensions</button>
+  <button role="tab" data-view="v-markets" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Marchés</button>
+  <button role="tab" data-view="v-dz" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M15 5a7 7 0 1 0 0 14 5.5 5.5 0 1 1 0-14z"/><path d="M17 9l.9 2 2.1.2-1.6 1.4.5 2.1-1.9-1.1-1.9 1.1.5-2.1-1.6-1.4 2.1-.2z"/></svg>Algérie</button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ============ RÉGLAGES — modifiables ============ */
+const CONFIG = {
+  // Proxys CORS de secours, utilisés seulement si l'appel direct échoue (flux RSS surtout).
+  proxies: [
+    u => u,
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    u => "https://corsproxy.io/?url=" + encodeURIComponent(u)
+  ],
+  refresh: { quakes: 5, eonet: 15, news: 10, conflicts: 15, crypto: 2, fx: 60, dz: 15 }, // minutes
+  news: [
+    { name: "France 24", url: "https://www.france24.com/fr/rss" },
+    { name: "Le Monde", url: "https://www.lemonde.fr/international/rss_full.xml" },
+    { name: "BBC", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+    { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" }
+  ],
+  dzFeeds: [
+    { name: "TSA Algérie", url: "https://www.tsa-algerie.com/feed/" }
+  ],
+  crypto: [
+    { id: "bitcoin", label: "Bitcoin" }, { id: "ethereum", label: "Ethereum" },
+    { id: "solana", label: "Solana" }, { id: "pax-gold", label: "Or (1 once, via PAXG)" }
+  ],
+  // Zone géographique pour les séismes "Algérie"
+  dzBox: { minlat: 18, maxlat: 38.5, minlon: -9, maxlon: 12.5 }
+};
+
+// Pays suivis pour l'indice de tension : [nom, lat, lon, motif de détection]
+const HOTSPOTS = [
+  ["Ukraine",49,32,/ukrain|kyiv|kiev|kharkiv|donbas/i],
+  ["Russie",56,38,/\b(russi|russe|moscou|moscow|kremlin|poutine|putin)/i],
+  ["Gaza / Palestine",31.4,34.4,/gaza|palestin|cisjordanie|west bank|hamas/i],
+  ["Israël",31.8,35.0,/isra[eë]l|idf|tsahal/i],
+  ["Liban",33.9,35.8,/leban|liban|hezbollah|beyrouth|beirut/i],
+  ["Syrie",35,38,/syri|damas|damascus/i],
+  ["Iran",32.4,53.7,/\biran|t[eé]h[eé]ran/i],
+  ["Yémen / mer Rouge",15.5,45,/y[eé]men|houthi|mer rouge|red sea/i],
+  ["Irak",33,44,/\bira[qk]|bagdad|baghdad/i],
+  ["Soudan",15.5,30,/soudan|sudan|darfour|darfur|khartoum/i],
+  ["Libye",27,17,/liby|tripoli|benghazi/i],
+  ["Mali",17,-4,/\bmali\b|bamako/i],
+  ["Niger",17,9,/\bniger\b|niamey/i],
+  ["Burkina Faso",12.3,-1.5,/burkina|ouagadougou/i],
+  ["RD Congo",-2,23.6,/congo|\bm23\b|goma|kinshasa/i],
+  ["Somalie",5,46,/somali|shebab|shabaab|mogadis/i],
+  ["Éthiopie",9,40,/ethiopi|[ée]thiopi|tigr/i],
+  ["Nigeria",9,8,/nigeria|boko haram/i],
+  ["Sahara occidental",24.2,-12.9,/sahara occidental|western sahara|polisario/i],
+  ["Afghanistan",34,66,/afghan|taliban|kaboul|kabul/i],
+  ["Pakistan",30,70,/pakistan|islamabad/i],
+  ["Inde / Cachemire",30,77,/\b(inde|india|kashmir|cachemire|new delhi)\b/i],
+  ["Birmanie",21,96,/myanmar|birmanie/i],
+  ["Taïwan",23.7,121,/ta[iï]wan/i],
+  ["Chine",35,104,/\b(chine|china|beijing|p[ée]kin)\b/i],
+  ["Corée du Nord",40,127,/cor[ée]e du nord|north korea|pyongyang/i],
+  ["Haïti",19,-72.5,/ha[iï]ti|port-au-prince/i],
+  ["Venezuela",7,-66,/venezuela|caracas/i]
+];
+const CRIT = /(\btu[ée]s?\b|\bmorts?\b|killed|\bdead\b|deaths?|missiles?|airstrikes?|air strikes?|frappes?|bombard|explosion|attentat|\battack|\battaque|massacre|invasion|shelling)/i;
+const ELEV = /(affrontements?|clashes|tensions?|sanctions?|protests?|manifestation|\bdrones?\b|militaire|military|troops|troupes|mobilis|ceasefire|cessez-le-feu|coup d'[ée]tat|\bcoup\b|rebels?|rebelles?)/i;
+
+/* ============ Outils ============ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const level = t => CRIT.test(t) ? "crit" : ELEV.test(t) ? "elev" : "";
+const fmt = (n, d=2) => n == null ? "–" : Number(n).toLocaleString("fr-FR", {minimumFractionDigits:d, maximumFractionDigits:d});
+function ago(ts){
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return "à l'instant";
+  if (s < 3600) return `il y a ${Math.round(s/60)} min`;
+  if (s < 86400) return `il y a ${Math.round(s/3600)} h`;
+  return `il y a ${Math.round(s/86400)} j`;
+}
+async function fetchVia(url, type = "json"){
+  let last;
+  for (const p of CONFIG.proxies){
+    try{
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
+      const r = await fetch(p(url), { signal: ctrl.signal, cache: "no-store" });
+      clearTimeout(t);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const txt = await r.text();
+      if (type === "json") return JSON.parse(txt);
+      if (!/<(rss|feed|rdf)/i.test(txt)) throw new Error("Flux invalide");
+      return txt;
+    }catch(e){ last = e; }
+  }
+  throw last;
+}
+// GDELT limite à une requête toutes les ~5 s : file d'attente
+let gq = Promise.resolve();
+function gdelt(query, timespan = "24h", max = 75){
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=${max}&format=json&sort=datedesc&timespan=${timespan}`;
+  const p = gq.then(() => fetchVia(url));
+  gq = p.catch(() => {}).then(() => sleep(6000));
+  return p.then(d => (d.articles || []).map(a => ({
+    title: a.title, link: a.url, source: a.domain,
+    time: Date.UTC(+a.seendate.slice(0,4), +a.seendate.slice(4,6)-1, +a.seendate.slice(6,8), +a.seendate.slice(9,11), +a.seendate.slice(11,13))
+  })));
+}
+function parseRSS(xml, source){
+  const d = new DOMParser().parseFromString(xml, "text/xml");
+  let items = [...d.getElementsByTagName("item")];
+  const atom = !items.length;
+  if (atom) items = [...d.getElementsByTagName("entry")];
+  return items.slice(0, 30).map(it => {
+    const g = n => it.getElementsByTagName(n)[0];
+    const link = atom ? (g("link")?.getAttribute("href") || "") : (g("link")?.textContent || "");
+    const date = (g("pubDate") || g("dc:date") || g("updated") || g("published"))?.textContent;
+    return { title: (g("title")?.textContent || "").trim(), link: link.trim(), source, time: date ? Date.parse(date) || Date.now() : Date.now() };
+  }).filter(x => x.title);
+}
+function dedupe(arr){
+  const seen = new Set();
+  return arr.filter(a => { const k = a.title.toLowerCase().replace(/\W+/g, "").slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+function save(k, v){ try{ localStorage.setItem("radar:" + k, JSON.stringify({ v, t: Date.now() })); }catch(e){} }
+function restore(k){ try{ return JSON.parse(localStorage.getItem("radar:" + k)); }catch(e){ return null; } }
+function setStatus(id, ok, t, label = ""){
+  const el = $("#" + id); if (!el) return;
+  el.classList.toggle("err", !ok);
+  el.textContent = ok ? `${label}Mis à jour ${ago(t)}` : `Source momentanément injoignable. Dernières données affichées si disponibles, nouvel essai automatique.`;
+}
+function itemHTML(a){
+  return `<li><a class="item ${level(a.title)}" href="${esc(a.link)}" target="_blank" rel="noopener">
+    <div class="t">${esc(a.title)}</div><div class="m">${esc(a.source)}, ${ago(a.time)}</div></a></li>`;
+}
+
+/* ============ Carte ============ */
+const map = L.map("map", { zoomControl: false, worldCopyJump: true, minZoom: 2 }).setView([28, 15], 2);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: "abcd", maxZoom: 10
+}).addTo(map);
+const layers = { quakes: L.layerGroup().addTo(map), eonet: L.layerGroup().addTo(map), tension: L.layerGroup().addTo(map) };
+document.querySelectorAll(".tog").forEach(b => b.addEventListener("click", () => {
+  const on = b.getAttribute("aria-pressed") !== "true";
+  b.setAttribute("aria-pressed", on);
+  on ? layers[b.dataset.layer].addTo(map) : map.removeLayer(layers[b.dataset.layer]);
+}));
+
+const state = { quakes: [], eonet: [], news: [], conflicts: [], newsFilter: "Tout" };
+
+/* ---- Séismes ---- */
+async function loadQuakes(){
+  try{
+    const d = await fetchVia("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson");
+    state.quakes = d.features.map(f => ({ mag: f.properties.mag, place: f.properties.place, time: f.properties.time,
+      url: f.properties.url, tsunami: f.properties.tsunami, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], depth: f.geometry.coordinates[2] }));
+    save("quakes", state.quakes);
+  }catch(e){ const r = restore("quakes"); if (r) state.quakes = r.v; }
+  drawQuakes();
+}
+function drawQuakes(){
+  layers.quakes.clearLayers();
+  state.quakes.forEach(q => {
+    const col = q.mag >= 6.5 ? "#E5484D" : q.mag >= 5.5 ? "#F2A541" : "#E8C07D";
+    L.circleMarker([q.lat, q.lon], { radius: 3 + (q.mag - 4) * 3, color: col, weight: 1.5, fillColor: col, fillOpacity: .35 })
+      .bindPopup(`<b>Séisme M${fmt(q.mag,1)}</b><br>${esc(q.place)}<br>Profondeur ${Math.round(q.depth)} km, ${ago(q.time)}${q.tsunami ? "<br><b style='color:#E5484D'>Alerte tsunami possible</b>" : ""}<br><a href="${esc(q.url)}" target="_blank" rel="noopener">Détails USGS</a>`)
+      .addTo(layers.quakes);
+  });
+  $("#cQuakes").textContent = state.quakes.length;
+}
+
+/* ---- Catastrophes naturelles (NASA EONET) ---- */
+const EV = { wildfires: ["🔥","Incendie"], severeStorms: ["🌀","Tempête"], volcanoes: ["🌋","Volcan"], floods: ["🌊","Inondation"],
+  seaLakeIce: ["🧊","Glaces"], drought: ["☀️","Sécheresse"], dustHaze: ["🌫️","Poussière / brume"], landslides: ["⛰️","Glissement de terrain"],
+  tempExtremes: ["🌡️","Températures extrêmes"], snow: ["❄️","Neige"], manmade: ["⚠️","Origine humaine"] };
+async function loadEonet(){
+  try{
+    const d = await fetchVia("https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=20&limit=150");
+    state.eonet = d.events.map(e => {
+      const g = e.geometry[e.geometry.length - 1];
+      let c = g.coordinates; while (Array.isArray(c[0])) c = c[0];
+      return { title: e.title, cat: e.categories[0]?.id, lon: c[0], lat: c[1], time: Date.parse(g.date), link: e.sources?.[0]?.url || e.link };
+    }).filter(e => e.cat !== "earthquakes");
+    save("eonet", state.eonet);
+  }catch(e){ const r = restore("eonet"); if (r) state.eonet = r.v; }
+  layers.eonet.clearLayers();
+  state.eonet.forEach(e => {
+    const [ic, lab] = EV[e.cat] || ["•", "Événement"];
+    L.marker([e.lat, e.lon], { icon: L.divIcon({ className: "ev", html: ic, iconSize: [20, 20] }) })
+      .bindPopup(`<b>${lab}</b><br>${esc(e.title)}<br>Dernière observation ${ago(e.time)}<br><a href="${esc(e.link)}" target="_blank" rel="noopener">Source</a>`)
+      .addTo(layers.eonet);
+  });
+  $("#cEonet").textContent = state.eonet.length;
+}
+
+/* ---- Actualités ---- */
+async function loadNews(){
+  const res = await Promise.allSettled(CONFIG.news.map(f => fetchVia(f.url, "text").then(x => parseRSS(x, f.name))));
+  const ok = res.filter(r => r.status === "fulfilled").flatMap(r => r.value);
+  if (ok.length){ state.news = dedupe(ok).sort((a, b) => b.time - a.time).slice(0, 120); save("news", state.news); }
+  else { const r = restore("news"); if (r) state.news = r.v; }
+  const failed = res.map((r, i) => r.status === "rejected" ? CONFIG.news[i].name : null).filter(Boolean);
+  setStatus("newsStatus", ok.length > 0, Date.now(), failed.length ? `Indisponible : ${failed.join(", ")}. ` : "");
+  renderNews(); computeTension();
+}
+function renderNews(){
+  const names = ["Tout", ...CONFIG.news.map(n => n.name)];
+  $("#newsChips").innerHTML = names.map(n => `<button class="chip" aria-pressed="${n === state.newsFilter}">${esc(n)}</button>`).join("");
+  $("#newsChips").querySelectorAll(".chip").forEach(b => b.onclick = () => { state.newsFilter = b.textContent; renderNews(); });
+  const list = state.news.filter(a => state.newsFilter === "Tout" || a.source === state.newsFilter);
+  $("#newsList").innerHTML = list.length ? list.map(itemHTML).join("") : `<li class="empty">Aucun titre pour le moment. Touchez ↻ pour réessayer.</li>`;
+}
+
+/* ---- Conflits et tensions ---- */
+async function loadConflicts(){
+  try{
+    const arts = await gdelt('(airstrike OR missile OR shelling OR clashes OR "drone strike" OR militants OR offensive OR frappe OR affrontements)', "24h", 150);
+    state.conflicts = dedupe(arts);
+    save("conflicts", state.conflicts);
+    setStatus("tensionStatus", true, Date.now());
+  }catch(e){
+    const r = restore("conflicts"); if (r) state.conflicts = r.v;
+    setStatus("tensionStatus", false);
+  }
+  computeTension();
+}
+function computeTension(){
+  const pool = dedupe([...state.conflicts, ...state.news.filter(a => level(a.title))]);
+  const scores = HOTSPOTS.map(([name, lat, lon, re]) => {
+    const hits = pool.filter(a => re.test(a.title));
+    const score = hits.reduce((s, a) => s + (level(a.title) === "crit" ? 2 : 1), 0);
+    return { name, lat, lon, score, n: hits.length };
+  }).filter(h => h.score > 0).sort((a, b) => b.score - a.score);
+  const max = scores[0]?.score || 1;
+
+  $("#hotList").innerHTML = scores.length ? scores.map(h => {
+    const pct = Math.round(h.score / max * 100), col = pct > 60 ? "var(--red)" : pct > 25 ? "var(--amber)" : "var(--sand)";
+    return `<div class="hot"><span class="n">${esc(h.name)}</span><span class="c" style="color:${col}">${h.n}</span>
+      <div class="bar"><span style="width:${pct}%;background:${col}"></span></div></div>`;
+  }).join("") : `<p class="empty">Pas encore assez de titres pour calculer l'indice.</p>`;
+
+  const cl = pool.filter(a => level(a.title)).sort((a, b) => b.time - a.time).slice(0, 60);
+  $("#conflictList").innerHTML = cl.length ? cl.map(itemHTML).join("") : `<li class="empty">Aucun titre pour le moment.</li>`;
+
+  layers.tension.clearLayers();
+  scores.forEach(h => {
+    const pct = h.score / max, size = Math.round(18 + pct * 34);
+    L.marker([h.lat, h.lon], { icon: L.divIcon({ className: "", html: `<div class="pulse ${pct > .4 ? "" : "mid"}" style="width:${size}px;height:${size}px"></div>`, iconSize: [size, size] }) })
+      .bindPopup(`<b>${esc(h.name)}</b><br>${h.n} titre(s) liés aux conflits sur 24 h`)
+      .addTo(layers.tension);
+  });
+  $("#cTension").textContent = scores.length;
+}
+
+/* ---- Marchés ---- */
+async function loadCrypto(){
+  try{
+    const ids = CONFIG.crypto.map(c => c.id).join(",");
+    const d = await fetchVia(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+    $("#cryptoGrid").innerHTML = CONFIG.crypto.map(c => {
+      const x = d[c.id] || {}, ch = x.usd_24h_change;
+      return `<div class="q"><div class="l">${esc(c.label)}</div><div class="v">${fmt(x.usd, x.usd > 100 ? 0 : 2)} $</div>
+        <div class="d ${ch >= 0 ? "up" : "down"}">${ch == null ? "" : (ch >= 0 ? "+" : "") + fmt(ch) + " % (24 h)"}</div></div>`;
+    }).join("");
+    setStatus("cryptoStatus", true, Date.now());
+  }catch(e){ setStatus("cryptoStatus", false); }
+}
+async function loadFx(){
+  try{
+    const d = await fetchVia("https://open.er-api.com/v6/latest/USD");
+    const r = d.rates, dzd = r.DZD;
+    const card = (l, v, d = 2) => `<div class="q"><div class="l">${l}</div><div class="v">${fmt(v, d)}</div></div>`;
+    $("#fxGrid").innerHTML = card("EUR / USD", 1 / r.EUR, 4) + card("USD / JPY", r.JPY) + card("GBP / USD", 1 / r.GBP, 4) + card("USD / CNY", r.CNY, 3);
+    $("#dzFx").innerHTML = card("1 € en dinars", dzd / r.EUR) + card("1 $ en dinars", dzd) + card("1 £ en dinars", dzd / r.GBP);
+  }catch(e){
+    $("#dzFx").innerHTML = `<p class="empty">Taux indisponibles pour le moment.</p>`;
+  }
+}
+function tvLoad(el){
+  if (el.dataset.loaded) return; el.dataset.loaded = "1";
+  el.classList.add("tradingview-widget-container");
+  el.innerHTML = `<div class="tradingview-widget-container__widget"></div>`;
+  const s = document.createElement("script");
+  s.src = "https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js"; s.async = true;
+  s.innerHTML = JSON.stringify({ symbol: el.dataset.tv, width: "100%", height: 170, locale: "fr", dateRange: "1M",
+    colorTheme: "dark", isTransparent: true, autosize: false, largeChartUrl: "" });
+  el.appendChild(s);
+}
+
+/* ---- Algérie ---- */
+async function loadDzQuakes(){
+  const b = CONFIG.dzBox, start = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  try{
+    const d = await fetchVia(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${start}&minmagnitude=2.5&minlatitude=${b.minlat}&maxlatitude=${b.maxlat}&minlongitude=${b.minlon}&maxlongitude=${b.maxlon}&orderby=time`);
+    const qs = d.features.map(f => ({ mag: f.properties.mag, place: f.properties.place, time: f.properties.time, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }));
+    $("#dzQuakes").innerHTML = qs.length ? qs.slice(0, 15).map((q, i) => `<li class="item ${q.mag >= 5 ? "crit" : q.mag >= 4 ? "elev" : ""}">
+      <div class="t">M${fmt(q.mag,1)}, ${esc(q.place)}</div>
+      <div class="m">${ago(q.time)} <button class="linkbtn" data-i="${i}">Voir sur la carte</button></div></li>`).join("")
+      : `<li class="empty">Aucun séisme de magnitude 2.5 ou plus ces 30 derniers jours.</li>`;
+    $("#dzQuakes").querySelectorAll(".linkbtn").forEach(btn => btn.onclick = () => {
+      const q = qs[+btn.dataset.i]; show("v-map");
+      setTimeout(() => { map.setView([q.lat, q.lon], 7); L.popup().setLatLng([q.lat, q.lon]).setContent(`<b>M${fmt(q.mag,1)}</b><br>${esc(q.place)}`).openOn(map); }, 80);
+    });
+    setStatus("dzQuakeStatus", true, Date.now());
+  }catch(e){ setStatus("dzQuakeStatus", false); }
+}
+async function loadDzNews(){
+  const jobs = [
+    ...CONFIG.dzFeeds.map(f => fetchVia(f.url, "text").then(x => parseRSS(x, f.name))),
+    gdelt("(algeria OR algérie OR algerie)", "3d", 60)
+  ];
+  const res = await Promise.allSettled(jobs);
+  let arts = res.filter(r => r.status === "fulfilled").flatMap(r => r.value);
+  arts = arts.concat(state.news.filter(a => /alg[eé]ri|alger\b|algiers/i.test(a.title)));
+  arts = dedupe(arts).sort((a, b) => b.time - a.time).slice(0, 60);
+  if (arts.length) save("dznews", arts); else { const r = restore("dznews"); if (r) arts = r.v; }
+  $("#dzNews").innerHTML = arts.length ? arts.map(itemHTML).join("") : `<li class="empty">Aucun titre pour le moment.</li>`;
+  setStatus("dzNewsStatus", arts.length > 0, Date.now());
+}
+
+/* ============ Navigation ============ */
+function show(id){
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === id));
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === id));
+  if (id === "v-map") setTimeout(() => map.invalidateSize(), 50);
+  document.querySelectorAll(`#${id} .tv`).forEach(tvLoad);
+  try{ sessionStorage.setItem("radar:tab", id); }catch(e){}
+}
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+
+/* ============ Planification ============ */
+const jobs = { quakes: loadQuakes, eonet: loadEonet, news: loadNews, conflicts: loadConflicts, crypto: loadCrypto, fx: loadFx, dz: () => { loadDzQuakes(); return loadDzNews(); } };
+let lastSync = 0;
+async function runAll(){
+  $("#refreshBtn").classList.add("spin");
+  await Promise.allSettled(Object.values(jobs).map(f => f()));
+  lastSync = Date.now();
+  $("#refreshBtn").classList.remove("spin");
+  tick();
+}
+function tick(){
+  const on = navigator.onLine;
+  $("#liveDot").classList.toggle("off", !on);
+  $("#liveTxt").textContent = !on ? "Hors ligne" : lastSync ? `Synchro ${ago(lastSync)}` : "Connexion…";
+}
+Object.entries(jobs).forEach(([k, f]) => setInterval(() => { if (!document.hidden) f().then(() => { lastSync = Date.now(); tick(); }); }, CONFIG.refresh[k] * 60000));
+setInterval(tick, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastSync > 5 * 60000) runAll(); });
+window.addEventListener("online", runAll); window.addEventListener("offline", tick);
+$("#refreshBtn").addEventListener("click", runAll);
+
+// Affichage immédiat des dernières données connues, puis actualisation
+["quakes", "eonet", "news", "conflicts"].forEach(k => { const r = restore(k); if (r) state[k] = r.v; });
+drawQuakes(); renderNews(); computeTension();
+try{ const t = sessionStorage.getItem("radar:tab"); if (t) show(t); }catch(e){}
+runAll();
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+</script>
+</body>
+</html>
